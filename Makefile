@@ -1,11 +1,11 @@
 TARGET		:= async_busexmp busexmp loopback
-LIBOBJS 	:= buse.o
+LIBOBJS 	:= buse.o lfqueue.o
 OBJS		:= $(TARGET:=.o) $(LIBOBJS)
 STATIC_LIB	:= libbuse.a
 
 CC		:= /usr/bin/gcc
 override CFLAGS += -g -pedantic -Wall -Wextra -std=c99
-LDFLAGS		:= -L. -lbuse
+LDFLAGS		:= -L. -lbuse -lpthread
 
 .PHONY: all clean test
 all: $(TARGET)

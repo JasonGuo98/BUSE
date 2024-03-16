@@ -9,16 +9,21 @@ extern "C" {
 
 #include <sys/types.h>
 #include <linux/nbd.h>
+#include "lfqueue.h"
 
 struct nbd_request_context;
 
-typedef void (*finish_callback)(int, struct nbd_request_context * );
+typedef void (*finish_callback)(struct nbd_request_context * );
 
 typedef struct nbd_request_context {
   struct nbd_request request;
   struct nbd_reply reply;
-  finish_callback callback;
+  finish_callback finish; // 可以并发调用，将指针传入一个无锁队列中，另一个线程从队列中取出并调用
+  finish_callback callback; // 不能并发调用，在finish线程中轮询无锁队列，调用callback
+
+  lfqueue_t *finish_ctx_queue;
   int sk;
+  int err;
   void *chunk;
 } nbd_request_context_t;
 
@@ -46,6 +51,7 @@ typedef struct nbd_request_context {
     u_int64_t size;
     u_int32_t blksize;
     u_int64_t size_blocks;
+    lfqueue_t finish_ctx_queue;
   };
   
   int buse_main(const char* dev_file, const struct buse_operations *bop, void *userdata);

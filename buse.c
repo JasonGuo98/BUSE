@@ -34,6 +34,9 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "buse.h"
 
@@ -90,10 +93,15 @@ static int write_all(int fd, char* buf, size_t count)
 }
 
 
+void nbd_request_finish(nbd_request_context_t * ctx){
+  while (lfqueue_enq(ctx->finish_ctx_queue, ctx) == -1)
+  {
+    fprintf(stderr, "ENQ Full ?\n");
+  }
+}
 
-
-void nbd_request_callback(int err, nbd_request_context_t * ctx){
-  ctx->reply.error = err;
+void nbd_request_callback(nbd_request_context_t * ctx){
+  ctx->reply.error = ctx->err;
   uint32_t len = ntohl(ctx->request.len);
   u_int64_t from = ntohll(ctx->request.from);
   write_all(ctx->sk, (char*)&(ctx->reply), sizeof(struct nbd_reply));
@@ -108,7 +116,7 @@ void nbd_request_callback(int err, nbd_request_context_t * ctx){
       fprintf(stderr, "callback W - %lu, %u\n", from, len);
       break;
     case NBD_CMD_DISC:
-      
+      assert(0);
       break;
     case NBD_FLAG_SEND_FLUSH:
       
@@ -126,13 +134,16 @@ void nbd_request_callback(int err, nbd_request_context_t * ctx){
   
 }
 
-void init_nbd_request_context(nbd_request_context_t * ctx, int sk){
+void init_nbd_request_context(nbd_request_context_t * ctx, int sk, lfqueue_t * queue){
   // 此时ctx->request已经被初始化
   ctx->reply.magic = htonl(NBD_REPLY_MAGIC);
   ctx->reply.error = htonl(0);
   memcpy(ctx->reply.handle, ctx->request.handle, sizeof(ctx->reply.handle));
+  ctx->finish = nbd_request_finish;
   ctx->callback = nbd_request_callback;
-
+  ctx->finish_ctx_queue = queue;
+  ctx->sk = sk;
+  ctx->err = 0;
   ctx->chunk = NULL;
   uint32_t len = ntohl(ctx->request.len);
   switch(ntohl(ctx->request.type)) {
@@ -155,7 +166,7 @@ void init_nbd_request_context(nbd_request_context_t * ctx, int sk){
 
   
 
-  ctx->sk = sk;
+  
 }
 
 
@@ -405,6 +416,26 @@ int buse_main(const char* dev_file, const struct buse_operations *aop, void *use
   return EXIT_SUCCESS;
 }
 
+void * finish_thread_func(void *userdata){
+  lfqueue_t *lfqueue = (lfqueue_t *)userdata;
+  nbd_request_context_t * ctx = NULL;
+  while(1){
+    ctx = lfqueue_single_deq(lfqueue);
+    if (ctx != NULL){
+      if(ntohl(ctx->request.type) == NBD_CMD_DISC){
+        free(ctx);
+        break;
+      }
+      else{
+        ctx->callback(ctx);
+      }
+    }
+    else{
+      lfqueue_sleep(1);
+    }
+  }
+  return NULL;
+}
 
 /* Serve userland side of nbd socket. If everything worked ok, return 0. */
 static int async_serve_nbd(int sk, const struct async_buse_operations * aop, void * userdata) {
@@ -415,13 +446,27 @@ static int async_serve_nbd(int sk, const struct async_buse_operations * aop, voi
   u_int64_t from;
   u_int32_t len;
   ssize_t bytes_read;
+  if (lfqueue_init((lfqueue_t *)&(aop->finish_ctx_queue)) == -1){
+    fprintf(stderr, "lfqueue_init failed\n");
+    return EXIT_FAILURE;
+  }
+
+  // 启动一个线程，轮询无锁队列，调用callback
+  printf("start finish_thread\n");
+  pthread_t finish_thread;
+  int status = pthread_create(&finish_thread, NULL, finish_thread_func, (void *)&(aop->finish_ctx_queue));
+  if(status!=0){
+      fprintf(stderr, "pthread_create returned error code %d\n",status);
+    	return EXIT_FAILURE;
+	}
+  printf("ok finish_thread\n");
 
   nbd_request_context_t * ctx = malloc(sizeof(nbd_request_context_t));// 在回调中释放
 
   while ((bytes_read = read(sk, &(ctx->request), sizeof(struct nbd_request))) > 0) {
     assert(bytes_read == sizeof(struct nbd_request));
     assert(ctx->request.magic == htonl(NBD_REQUEST_MAGIC));
-    init_nbd_request_context(ctx, sk);
+    init_nbd_request_context(ctx, sk, (lfqueue_t * )(&(aop->finish_ctx_queue)));
 
     len = ntohl(ctx->request.len);
     from = ntohll(ctx->request.from);
@@ -486,6 +531,9 @@ static int async_serve_nbd(int sk, const struct async_buse_operations * aop, voi
 
     ctx = malloc(sizeof(nbd_request_context_t));// 申请新的ctx
   }
+  sleep(1);
+  pthread_join(finish_thread, NULL);
+
   if (bytes_read == -1) {
     warn("error reading userside of nbd socket");
     return EXIT_FAILURE;

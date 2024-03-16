@@ -32,29 +32,34 @@ static void async_xmp_read(void *buf, u_int32_t len, u_int64_t offset, nbd_reque
 {
   
   memcpy(buf, (char *)data + offset, len);
-  ctx->callback(0, ctx);
+  ctx->err = 0;
+  ctx->finish(ctx);// 这个需要在另一个线程中调用
 }
 
 static void async_xmp_write(const void *buf, u_int32_t len, u_int64_t offset, nbd_request_context_t *ctx)
 {
   memcpy((char *)data + offset, buf, len);
-  ctx->callback(0, ctx);
+  ctx->err = 0;
+  ctx->finish(ctx);
 }
 
 static void async_xmp_disc(nbd_request_context_t *ctx)
 {
-    ctx->callback(0, ctx);
+  ctx->err = 0;
+  ctx->finish(ctx);
 }
 
 static void async_xmp_flush(nbd_request_context_t *ctx)
 {
-  ctx->callback(0, ctx);
+  ctx->err = 0;
+  ctx->finish(ctx);
 }
 
 static void async_xmp_trim(u_int64_t from, u_int32_t len, nbd_request_context_t *ctx)
 {
-    printf("Trimming %u bytes from offset %lu\n", len, from);
-  ctx->callback(0, ctx);
+  printf("Trimming %u bytes from offset %lu\n", len, from);
+  ctx->err = 0;
+  ctx->finish(ctx);
 }
 
 /* argument parsing using argp */
