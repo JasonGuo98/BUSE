@@ -110,19 +110,17 @@ void nbd_request_callback(nbd_request_context_t * ctx){
   switch(ntohl(ctx->request.type)) {
     case NBD_CMD_READ:
       write_all(ctx->sk, (char*)ctx->chunk, len);
-      fprintf(stderr, "callback R - %lu, %u\n", from, len);
+      // fprintf(stderr, "callback R - %lu, %u\n", from, len);
       break;
     case NBD_CMD_WRITE:
-      fprintf(stderr, "callback W - %lu, %u\n", from, len);
+      // fprintf(stderr, "callback W - %lu, %u\n", from, len);
       break;
     case NBD_CMD_DISC:
       assert(0);
       break;
-    case NBD_FLAG_SEND_FLUSH:
-      
+    case NBD_CMD_FLUSH:
       break;
-    case NBD_FLAG_SEND_TRIM:
-      
+    case NBD_CMD_TRIM:
       break;
     default:
       assert(0);
@@ -156,17 +154,13 @@ void init_nbd_request_context(nbd_request_context_t * ctx, int sk, lfqueue_t * q
       break;
     case NBD_CMD_DISC:
       break;
-    case NBD_FLAG_SEND_FLUSH:
+    case NBD_CMD_FLUSH:
       break;
-    case NBD_FLAG_SEND_TRIM:
+    case NBD_CMD_TRIM:
       break;
     default:
       assert(0);
   }
-
-  
-
-  
 }
 
 
